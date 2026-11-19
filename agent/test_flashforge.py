@@ -1,9 +1,16 @@
 import unittest
 
-from flashforge import FlashForgeError, normalize_detail
+from flashforge import FlashForgeError, is_ad5x_pid, normalize_detail
 
 
 class NormalizeDetailTests(unittest.TestCase):
+    def test_accepts_ad5x_pid_decimal_and_hex(self):
+        self.assertTrue(is_ad5x_pid(38))
+        self.assertTrue(is_ad5x_pid("38"))
+        self.assertTrue(is_ad5x_pid("26"))
+        self.assertTrue(is_ad5x_pid("0x26"))
+        self.assertFalse(is_ad5x_pid(36))
+
     def test_normalizes_ad5x_status_without_leaking_camera_url(self):
         data = normalize_detail({
             "pid": 38,
