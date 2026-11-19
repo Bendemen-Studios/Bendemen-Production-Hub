@@ -229,6 +229,22 @@ function printerCard(a){
  if(a.printer_host)card.append(node('div','muted-line','LAN: '+a.printer_host+':8898'));
  return card;
 }
+async function refreshHistory(){
+ try{
+  const r=await fetch('/api/history?limit=20',{cache:'no-store'});if(!r.ok)throw Error();
+  const data=await r.json(),target=$('history');target.replaceChildren();
+  if(!data.jobs.length){target.append(node('div','empty','No print jobs recorded yet.'));return}
+  const table=node('table',''),thead=node('thead',''),hr=node('tr','');
+  ['Printer','File','Started','Finished','Result'].forEach(t=>hr.append(node('th','',t)));
+  thead.append(hr);table.append(thead);const body=node('tbody','');
+  data.jobs.forEach(j=>{
+   const tr=node('tr','');
+   [j.printer_name||j.agent_id,j.file_name,new Date(j.started_at).toLocaleString(),j.ended_at?new Date(j.ended_at).toLocaleString():'In progress'].forEach(v=>tr.append(node('td','',v)));
+   const td=node('td',''),badge=node('span','result '+(j.result||'active'),j.result||'active');td.append(badge);tr.append(td);body.append(tr);
+  });
+  table.append(body);target.append(table);
+ }catch(e){$('history').textContent='Could not load print history'}
+}
 async function refresh(){
  try{
   const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('Status request failed');
@@ -242,7 +258,7 @@ async function refresh(){
   else agents.forEach(a=>target.append(printerCard(a)));
  }catch(e){$('hub').textContent='Unavailable';$('updated').textContent='Could not load printer status'}
 }
-refresh();setInterval(refresh,4000);
+refresh();refreshHistory();setInterval(refresh,4000);setInterval(refreshHistory,15000);
 </script></body></html>"""
 
 
@@ -261,6 +277,33 @@ async def status(_: str = Depends(admin_auth)):
         records[agent_id] = public_agent(agent_id, state, state.get("last_seen", utcnow()), agent_id in connections)
     agents = sorted(records.values(), key=lambda item: item["printer_name"].lower())
     return JSONResponse({"application": NAME, "version": VERSION, "agents": agents, "agent": agents[0] if agents else None})
+
+
+@app.get("/api/history")
+async def history(limit: int = 20, _: str = Depends(admin_auth)):
+    limit = max(1, min(limit, 100))
+    with database() as conn:
+        rows = conn.execute(
+            """SELECT p.id,p.agent_id,p.file_name,p.started_at,p.ended_at,p.result,p.last_progress,
+                      a.payload
+               FROM print_jobs p LEFT JOIN agents a ON a.agent_id=p.agent_id
+               ORDER BY p.started_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    jobs = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        jobs.append({
+            "id": row["id"], "agent_id": row["agent_id"],
+            "printer_name": payload.get("printer_name", row["agent_id"]),
+            "file_name": row["file_name"], "started_at": row["started_at"],
+            "ended_at": row["ended_at"], "result": row["result"] or "active",
+            "last_progress": row["last_progress"],
+        })
+    return {"jobs": jobs}
 
 
 @app.websocket("/ws/agent")
@@ -309,6 +352,7 @@ async def agent_ws(ws: WebSocket):
             seen = utcnow()
             live_state[agent_id] = {**payload, "last_seen": seen}
             with database() as conn:
+                record_print_update(conn, agent_id, payload, seen)
                 conn.execute(
                     "INSERT INTO agents(agent_id,last_seen,payload) VALUES(?,?,?) "
                     "ON CONFLICT(agent_id) DO UPDATE SET last_seen=excluded.last_seen,payload=excluded.payload",
