@@ -1,6 +1,6 @@
 # Bendemen Production Hub
 
-Self-hosted production and 3D-printer management. MVP v0.6 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history and manual filament inventory management with product links. The first supported printer integration is the Flashforge AD5X.
+Self-hosted production and 3D-printer management. MVP v0.7 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history, filament inventory and manual material-consumption/cost tracking. The first supported printer integration is the Flashforge AD5X.
 
 ## VPS deployment
 
@@ -80,7 +80,13 @@ The Hub records a print session when the AD5X reports a printing state, tracks p
 
 The dashboard includes a manual filament stock register. Add a spool with its name, brand, material, color, original spool weight and current remaining weight. Existing spools can be edited or deleted. Supported material labels are PLA, PLA+, PETG, ABS, ASA, TPU, NYLON, PC and OTHER.
 
-Each spool can also store an optional HTTP/HTTPS shopping link to its product page. The dashboard displays a product/reorder link on that spool card. Existing inventory records are migrated automatically when the Hub starts.
+Each spool stores its purchase price in EUR and can also store an optional HTTP/HTTPS shopping link to its product page. Existing inventory records are migrated automatically when the Hub starts.
+
+## Material use and costs
+
+After a print is recorded, select the print job and the filament spool used, then enter the consumed grams. The Hub calculates the material cost from the spool purchase price divided by its original spool weight, stores a cost snapshot for that usage entry, and subtracts the grams from the spool's remaining stock. The dashboard shows total recorded grams, total recorded material costs and recent usage entries. A spool with recorded usage cannot be deleted, so its history and cost records remain intact.
+
+Material consumption is manually entered. The current AD5X integration does not provide verified per-print filament usage, so the Hub does not automatically infer or subtract material. Costs cover filament material only; electricity, printer depreciation, failed-print overhead and labor are not included.
 
 Stock is currently maintained manually in grams. The Hub does not estimate or subtract filament consumption from print jobs because the current AD5X telemetry adapter does not provide a verified per-job material usage value. No spool is changed automatically when a print starts or finishes.
 
