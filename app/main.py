@@ -5,6 +5,7 @@ import math
 import os
 import re
 import sqlite3
+from urllib.parse import urlsplit
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -106,6 +107,20 @@ def normalize_filament(data: dict) -> dict:
     material = clean_text(data.get("material"), 24).upper()
     color = clean_text(data.get("color"), 40)
     notes = clean_text(data.get("notes"), 500)
+    shopping_url = clean_text(data.get("shopping_url"), 500)
+    if shopping_url:
+        try:
+            parsed_url = urlsplit(shopping_url)
+            valid_url = (
+                parsed_url.scheme.lower() in {"http", "https"}
+                and bool(parsed_url.netloc)
+                and not parsed_url.username
+                and not parsed_url.password
+            )
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise ValueError("Shopping link must be a valid HTTP or HTTPS URL.")
     allowed_materials = {"PLA", "PLA+", "PETG", "ABS", "ASA", "TPU", "NYLON", "PC", "OTHER"}
     if not name:
         raise ValueError("Filament name is required.")
@@ -120,14 +135,14 @@ def normalize_filament(data: dict) -> dict:
     return {
         "name": name, "brand": brand, "material": material, "color": color,
         "spool_weight_g": float(spool_weight), "remaining_weight_g": float(remaining),
-        "notes": notes,
+        "notes": notes, "shopping_url": shopping_url,
     }
 
 
 def public_filament(row) -> dict:
     return {key: row[key] for key in (
         "id", "name", "brand", "material", "color",
-        "spool_weight_g", "remaining_weight_g", "notes", "created_at", "updated_at"
+        "spool_weight_g", "remaining_weight_g", "notes", "shopping_url", "created_at", "updated_at"
     )}
 
 
@@ -187,6 +202,9 @@ async def startup():
             updated_at TEXT NOT NULL
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_filaments_updated ON filaments(updated_at DESC)")
+        filament_columns = {row["name"] for row in conn.execute("PRAGMA table_info(filaments)").fetchall()}
+        if "shopping_url" not in filament_columns:
+            conn.execute("ALTER TABLE filaments ADD COLUMN shopping_url TEXT NOT NULL DEFAULT ''")
 
 
 def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -245,7 +263,7 @@ th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08
 footer{margin-top:28px;color:#747985;font-size:12px}
 @media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
 </style></head><body><main>
-<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.5.0</span></div>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.6.0</span></div>
 <div class="summary">
 <section class="metric"><div class="label">Printers registered</div><div class="metric-value" id="count">0</div></section>
 <section class="metric"><div class="label">Agents online</div><div class="metric-value" id="online">0</div></section>
@@ -263,6 +281,7 @@ footer{margin-top:28px;color:#747985;font-size:12px}
   <div class="field"><label for="fil-color">Color</label><input id="fil-color" maxlength="40" placeholder="Matte black"></div>
   <div class="field"><label for="fil-spool">Original spool weight (g) *</label><input id="fil-spool" type="number" min="1" step="1" value="1000"></div>
   <div class="field"><label for="fil-remaining">Remaining filament (g) *</label><input id="fil-remaining" type="number" min="0" step="1" value="1000"></div>
+  <div class="field"><label for="fil-shopping">Shopping link</label><input id="fil-shopping" type="url" maxlength="500" placeholder="https://shop.example.com/filament"></div>
  </div>
  <div class="field" style="margin-top:10px"><label for="fil-notes">Notes</label><textarea id="fil-notes" maxlength="500" placeholder="Nozzle temperature, storage location…"></textarea></div>
  <div class="actions"><button class="action primary" id="fil-save">Add filament</button><button class="action" id="fil-cancel" hidden>Cancel edit</button></div>
@@ -316,6 +335,9 @@ function filamentCard(f){
  card.append(node('div','filament-meta',Math.round(f.remaining_weight_g)+' g remaining · '+Math.round(percent)+'% of '+Math.round(f.spool_weight_g)+' g'));
  const bar=node('div','stockbar'),fill=node('div','stockfill');fill.style.width=percent+'%';bar.append(fill);card.append(bar);
  if(f.notes)card.append(node('div','filament-meta',f.notes));
+ if(f.shopping_url){
+  const link=node('a','filament-meta','View product / reorder');link.href=f.shopping_url;link.target='_blank';link.rel='noopener noreferrer';link.style.display='inline-block';link.style.color='#f28b86';link.style.textDecoration='underline';card.append(link);
+ }
  const actions=node('div','actions'),edit=node('button','action','Edit'),del=node('button','action danger','Delete');
  edit.type=del.type='button';edit.addEventListener('click',()=>editFilament(f));del.addEventListener('click',()=>deleteFilament(f.id));actions.append(edit,del);card.append(actions);
  return card;
@@ -329,20 +351,20 @@ async function refreshFilaments(){
 }
 function resetFilamentForm(){
  editingFilament=null;
- ['fil-name','fil-brand','fil-color','fil-notes'].forEach(id=>$(id).value='');
+ ['fil-name','fil-brand','fil-color','fil-notes','fil-shopping'].forEach(id=>$(id).value='');
  $('fil-material').value='PLA';$('fil-spool').value='1000';$('fil-remaining').value='1000';
  $('fil-save').textContent='Add filament';$('fil-cancel').hidden=true;
 }
 function editFilament(f){
  editingFilament=f.id;
  $('fil-name').value=f.name;$('fil-brand').value=f.brand;$('fil-material').value=f.material;
- $('fil-color').value=f.color;$('fil-spool').value=f.spool_weight_g;$('fil-remaining').value=f.remaining_weight_g;$('fil-notes').value=f.notes;
+ $('fil-color').value=f.color;$('fil-shopping').value=f.shopping_url||'';$('fil-spool').value=f.spool_weight_g;$('fil-remaining').value=f.remaining_weight_g;$('fil-notes').value=f.notes;
  $('fil-save').textContent='Save changes';$('fil-cancel').hidden=false;$('fil-message').textContent='Editing '+f.name;
  $('fil-name').focus();window.scrollTo({top:0,behavior:'smooth'});
 }
 async function saveFilament(){
  const payload={name:$('fil-name').value,brand:$('fil-brand').value,material:$('fil-material').value,color:$('fil-color').value,
-  spool_weight_g:Number($('fil-spool').value),remaining_weight_g:Number($('fil-remaining').value),notes:$('fil-notes').value};
+  spool_weight_g:Number($('fil-spool').value),remaining_weight_g:Number($('fil-remaining').value),notes:$('fil-notes').value,shopping_url:$('fil-shopping').value};
  $('fil-save').disabled=true;
  try{const r=await fetch(editingFilament?'/api/filaments/'+editingFilament:'/api/filaments',{method:editingFilament?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await r.json();if(!r.ok)throw Error(data.detail||'Could not save filament');
@@ -423,10 +445,10 @@ async def create_filament(payload: dict, _: str = Depends(admin_auth)):
     now = utcnow()
     with database() as conn:
         cursor = conn.execute(
-            """INSERT INTO filaments(name,brand,material,color,spool_weight_g,remaining_weight_g,notes,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO filaments(name,brand,material,color,spool_weight_g,remaining_weight_g,notes,shopping_url,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
-             item["remaining_weight_g"], item["notes"], now, now),
+             item["remaining_weight_g"], item["notes"], item["shopping_url"], now, now),
         )
         row = conn.execute("SELECT * FROM filaments WHERE id=?", (cursor.lastrowid,)).fetchone()
     return {"filament": public_filament(row)}
@@ -442,9 +464,9 @@ async def update_filament(filament_id: int, payload: dict, _: str = Depends(admi
     with database() as conn:
         cursor = conn.execute(
             """UPDATE filaments SET name=?,brand=?,material=?,color=?,spool_weight_g=?,
-               remaining_weight_g=?,notes=?,updated_at=? WHERE id=?""",
+               remaining_weight_g=?,notes=?,shopping_url=?,updated_at=? WHERE id=?""",
             (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
-             item["remaining_weight_g"], item["notes"], now, filament_id),
+             item["remaining_weight_g"], item["notes"], item["shopping_url"], now, filament_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(404, "Filament not found")
