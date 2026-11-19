@@ -159,6 +159,53 @@ def normalize_filament(data: dict) -> dict:
     }
 
 
+
+
+def build_filament_inventory(items):
+    filaments = []
+    for source in items:
+        item = dict(source)
+        item["remaining_value_eur"] = round(
+            item["remaining_weight_g"] * item["purchase_price_eur"] / item["spool_weight_g"], 2
+        )
+        filaments.append(item)
+    products = {}
+    for item in filaments:
+        key = (item["name"].casefold(), item["brand"].casefold(), item["material"], item["color"].casefold())
+        if key not in products:
+            products[key] = {
+                "product_name": " ".join(x for x in (item["brand"], item["name"]) if x),
+                "spools": 0, "remaining_grams": 0.0, "remaining_value_eur": 0.0,
+                "low_stock_spools": 0,
+            }
+        group = products[key]
+        group["spools"] += 1
+        group["remaining_grams"] += item["remaining_weight_g"]
+        group["remaining_value_eur"] += item["remaining_value_eur"]
+        if item["remaining_weight_g"] <= item["low_stock_threshold_g"]:
+            group["low_stock_spools"] += 1
+    summary = {
+        "remaining_grams": round(sum(x["remaining_weight_g"] for x in filaments), 2),
+        "remaining_value_eur": round(sum(x["remaining_value_eur"] for x in filaments), 2),
+        "low_stock_spools": sum(1 for x in filaments if x["remaining_weight_g"] <= x["low_stock_threshold_g"]),
+        "product_count": len(products),
+    }
+    return filaments, list(products.values()), summary
+
+
+def calculate_monthly_totals(row):
+    revenue = safe_number(row["revenue_eur"])
+    material = safe_number(row["material_cost_eur"])
+    extra = safe_number(row["extra_costs_eur"])
+    if any(value is None or value < 0 for value in (revenue, material, extra)):
+        raise ValueError("Monthly financial values must be non-negative finite amounts.")
+    total_costs = round(material + extra, 2)
+    return {
+        "total_costs_eur": total_costs,
+        "profit_eur": round(revenue - total_costs, 2),
+    }
+
+
 def public_filament(row) -> dict:
     return {key: row[key] for key in (
         "id", "name", "brand", "material", "color",
@@ -642,35 +689,8 @@ async def status(_: str = Depends(admin_auth)):
 async def list_filaments(_: str = Depends(admin_auth)):
     with database() as conn:
         rows = conn.execute("SELECT * FROM filaments ORDER BY updated_at DESC, id DESC").fetchall()
-    filaments = []
-    for row in rows:
-        item = public_filament(row)
-        item["remaining_value_eur"] = round(
-            item["remaining_weight_g"] * item["purchase_price_eur"] / item["spool_weight_g"], 2
-        )
-        filaments.append(item)
-    products = {}
-    for item in filaments:
-        key = (item["name"].casefold(), item["brand"].casefold(), item["material"], item["color"].casefold())
-        if key not in products:
-            products[key] = {
-                "product_name": " ".join(x for x in (item["brand"], item["name"]) if x),
-                "spools": 0, "remaining_grams": 0.0, "remaining_value_eur": 0.0,
-                "low_stock_spools": 0,
-            }
-        group = products[key]
-        group["spools"] += 1
-        group["remaining_grams"] += item["remaining_weight_g"]
-        group["remaining_value_eur"] += item["remaining_value_eur"]
-        if item["remaining_weight_g"] <= item["low_stock_threshold_g"]:
-            group["low_stock_spools"] += 1
-    summary = {
-        "remaining_grams": round(sum(x["remaining_weight_g"] for x in filaments), 2),
-        "remaining_value_eur": round(sum(x["remaining_value_eur"] for x in filaments), 2),
-        "low_stock_spools": sum(1 for x in filaments if x["remaining_weight_g"] <= x["low_stock_threshold_g"]),
-        "product_count": len(products),
-    }
-    return {"filaments": filaments, "products": list(products.values()), "summary": summary}
+    filaments, products, summary = build_filament_inventory([public_filament(row) for row in rows])
+    return {"filaments": filaments, "products": products, "summary": summary}
 
 
 @app.post("/api/filaments")
@@ -896,8 +916,7 @@ async def monthly_reports(months: int = 12, _: str = Depends(admin_auth)):
     reports = []
     for row in rows:
         item = dict(row)
-        item["total_costs_eur"] = round(item["material_cost_eur"] + item["extra_costs_eur"], 2)
-        item["profit_eur"] = round(item["revenue_eur"] - item["total_costs_eur"], 2)
+        item.update(calculate_monthly_totals(item))
         reports.append(item)
     return {"reports": reports}
 
