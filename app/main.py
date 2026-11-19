@@ -482,6 +482,16 @@ footer{margin-top:28px;color:#747985;font-size:12px}
 <div class="history-wrap" id="sales-history"><div class="empty">No sales recorded yet.</div></div>
 <h2 class="section">Monthly financial reports</h2>
 <div class="history-wrap" id="monthly-reports"><div class="empty">Loading monthly reports…</div></div>
+<h2 class="section">Slicer imports · OrcaSlicer</h2>
+<div class="inventory-form">
+ <p>Import a text G-code file from OrcaSlicer. The Hub reads its header only; it never sends the file to a printer.</p>
+ <div class="form-grid">
+  <div class="field"><label for="slicer-file">G-code file</label><input id="slicer-file" type="file" accept=".gcode,.gco,.gc"></div>
+  <div class="field"><label>&nbsp;</label><button class="action primary" id="slicer-import-button" type="button">Import slicer metadata</button></div>
+ </div>
+ <div class="form-message" id="slicer-message">Supported: OrcaSlicer and compatible PrusaSlicer G-code headers. No stock is deducted automatically.</div>
+</div>
+<div class="history-wrap" id="slicer-imports"><div class="empty">No slicer files imported yet.</div></div>
 <h2 class="section">Print history</h2><div class="history-wrap" id="history"><div class="empty">No print jobs recorded yet.</div></div><div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
@@ -692,6 +702,40 @@ async function refreshMonthlyReports(){
   table.append(body);target.append(table);
  }catch(e){$('monthly-reports').textContent='Could not load monthly reports.'}
 }
+async function importSlicerFile(){
+ const input=$('slicer-file'),button=$('slicer-import-button'),message=$('slicer-message'),file=input.files&&input.files[0];
+ if(!file){message.textContent='Choose a .gcode file first.';return}
+ if(file.size===0){message.textContent='The selected file is empty.';return}
+ button.disabled=true;message.textContent='Reading G-code header…';
+ try{
+  const header=await file.slice(0,512*1024).text();
+  const response=await fetch('/api/slicer/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,header})});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.detail||'Import failed');
+  const item=data.import;
+  const duration=item.estimated_minutes===null?'unknown':item.estimated_minutes+' min';
+  const grams=item.filament_grams===null?'unknown':item.filament_grams+' g';
+  message.textContent='Imported '+item.file_name+' · '+duration+' · '+grams;
+  input.value='';await refreshSlicerImports();
+ }catch(error){message.textContent='Import failed: '+error.message}
+ finally{button.disabled=false}
+}
+async function refreshSlicerImports(){
+ try{
+  const response=await fetch('/api/slicer/imports?limit=50',{cache:'no-store'});if(!response.ok)throw Error();
+  const data=await response.json(),target=$('slicer-imports');target.replaceChildren();
+  if(!data.imports.length){target.append(node('div','empty','No slicer files imported yet.'));return}
+  const table=node('table',''),thead=node('thead',''),head=node('tr','');
+  ['File','Slicer','Material','Filament','Estimated time','Layers','Imported'].forEach(x=>head.append(node('th','',x)));
+  thead.append(head);table.append(thead);const body=node('tbody','');
+  data.imports.forEach(item=>{
+   const tr=node('tr','');
+   [item.file_name,item.slicer,item.material||'—',item.filament_grams===null?'—':item.filament_grams+' g',item.estimated_seconds===null?'—':fmtTime(item.estimated_seconds),item.total_layers??'—',new Date(item.imported_at).toLocaleString()].forEach(v=>tr.append(node('td','',String(v))));
+   body.append(tr);
+  });
+  table.append(body);target.append(table);
+ }catch(e){$('slicer-imports').textContent='Could not load slicer imports.'}
+}
 async function refreshHistory(){
  try{
   const r=await fetch('/api/history?limit=20',{cache:'no-store'});if(!r.ok)throw Error();
@@ -721,7 +765,7 @@ async function refresh(){
   else agents.forEach(a=>target.append(printerCard(a)));
  }catch(e){$('hub').textContent='Unavailable';$('updated').textContent='Could not load printer status'}
 }
-refresh();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();refreshSalesOptions();refreshSales();refreshMonthlyReports();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);setInterval(refreshSales,30000);setInterval(refreshSalesOptions,30000);setInterval(refreshMonthlyReports,60000);
+refresh();$('slicer-import-button').addEventListener('click',importSlicerFile);refreshSlicerImports();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();refreshSalesOptions();refreshSales();refreshMonthlyReports();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);setInterval(refreshSales,30000);setInterval(refreshSalesOptions,30000);setInterval(refreshMonthlyReports,60000);
 </script></body></html>"""
 
 
