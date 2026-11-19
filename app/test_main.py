@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from app.main import clean_text, normalize_filament, public_agent, record_print_update, safe_number
+from app.main import calculate_sale_totals, clean_text, normalize_filament, public_agent, record_print_update, safe_number
 
 
 class HubStatusTests(unittest.TestCase):
@@ -143,6 +143,22 @@ class FilamentInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Purchase price"):
             normalize_filament(data)
 
+
+
+class SalesCalculationTests(unittest.TestCase):
+    def test_calculates_total_cost_and_profit(self):
+        result = calculate_sale_totals(4.99, 1.06, 0.33)
+        self.assertEqual(result["material_cost_eur"], 1.06)
+        self.assertEqual(result["total_costs_eur"], 1.39)
+        self.assertEqual(result["profit_eur"], 3.60)
+
+    def test_supports_loss_making_print(self):
+        result = calculate_sale_totals(1.00, 1.50, 0.25)
+        self.assertEqual(result["profit_eur"], -0.75)
+
+    def test_rejects_invalid_cost_values(self):
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            calculate_sale_totals(4.99, float("nan"), 0.10)
 
 if __name__ == "__main__":
     unittest.main()
