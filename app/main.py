@@ -16,7 +16,7 @@ DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
 AGENT_TOKEN = os.getenv("HUB_AGENT_TOKEN", "")
-app = FastAPI(title=NAME, version="0.1.0")
+app = FastAPI(title=NAME, version="0.2.0")
 security = HTTPBasic()
 connections: dict[str, WebSocket] = {}
 live_state: dict[str, dict[str, Any]] = {}
@@ -53,7 +53,7 @@ def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "name": NAME, "version": "0.1.0"}
+    return {"status": "ok", "name": NAME, "version": "0.2.0"}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -63,27 +63,48 @@ async def dashboard(_: str = Depends(admin_auth)):
 <style>
 :root{color-scheme:dark;--bg:#101114;--panel:#191b20;--muted:#a0a5b0;--accent:#c3110c}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#f5f5f5;font:15px Inter,system-ui,sans-serif}
-main{max-width:1050px;margin:auto;padding:38px 22px}.head{display:flex;justify-content:space-between;align-items:center;gap:16px}
-h1{font-size:26px;margin:0}p,.sub{color:var(--muted)}.pill{border:1px solid #343740;border-radius:999px;padding:7px 12px;color:var(--muted);font-size:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:28px}
-.card{background:var(--panel);border:1px solid #292c34;border-radius:16px;padding:20px}.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-.value{font-size:23px;font-weight:650;margin-top:10px}.sub{font-size:13px;margin-top:8px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#777;margin-right:8px}.on{background:#35bd78}
-.notice{margin-top:22px;padding:16px;border-radius:12px;background:#241c1b;border:1px solid #49302d;color:#e5c2bd}footer{margin-top:28px;color:#747985;font-size:12px}
-</style></head><body><main><div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.1.0</span></div>
+main{max-width:1120px;margin:auto;padding:36px 22px}.head{display:flex;justify-content:space-between;align-items:center;gap:16px}
+h1{font-size:26px;margin:0}p,.muted{color:var(--muted)}.pill{border:1px solid #343740;border-radius:999px;padding:7px 12px;color:var(--muted);font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:26px}
+.card{background:var(--panel);border:1px solid #292c34;border-radius:15px;padding:18px}.label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
+.value{font-size:23px;font-weight:650;margin-top:9px}.sub{font-size:13px;color:var(--muted);margin-top:7px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#777;margin-right:8px}.on{background:#35bd78}.bar{height:8px;background:#30333b;border-radius:20px;margin-top:12px;overflow:hidden}.fill{height:100%;background:var(--accent);width:0;transition:width .3s}
+.notice{margin-top:20px;padding:14px 16px;border-radius:12px;background:#241c1b;border:1px solid #49302d;color:#e5c2bd}
+.section{margin-top:28px;font-size:16px}footer{margin-top:28px;color:#747985;font-size:12px}
+@media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
+</style></head><body><main>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.2.0</span></div>
+<h2 class="section">Printer overview</h2>
 <div class="grid">
 <section class="card"><div class="label">Local agent</div><div class="value" id="agent">Waiting</div><div class="sub" id="seen">No agent connected</div></section>
-<section class="card"><div class="label">Flashforge AD5X</div><div class="value" id="printer">Unknown</div><div class="sub" id="reach">Waiting for local diagnostics</div></section>
-<section class="card"><div class="label">Camera</div><div class="value">Not configured</div><div class="sub">Camera hardware and stream URL must be verified first</div></section>
-</div><div class="notice"><b>Safe mode:</b> this MVP checks connectivity only. It does not send print, movement, pause or cancel commands.</div>
+<section class="card"><div class="label">Printer state</div><div class="value" id="state">Unknown</div><div class="sub" id="model">Flashforge AD5X · LAN API</div></section>
+<section class="card"><div class="label">Print progress</div><div class="value" id="progress">—</div><div class="bar"><div class="fill" id="progressbar"></div></div><div class="sub" id="job">No active job</div></section>
+<section class="card"><div class="label">Nozzle temperature</div><div class="value" id="nozzle">—</div><div class="sub" id="nozzleTarget">Target —</div></section>
+<section class="card"><div class="label">Bed temperature</div><div class="value" id="bed">—</div><div class="sub" id="bedTarget">Target —</div></section>
+<section class="card"><div class="label">Layers</div><div class="value" id="layers">—</div><div class="sub" id="time">Remaining —</div></section>
+<section class="card"><div class="label">Camera accessory</div><div class="value" id="camera">Unknown</div><div class="sub">AD5X has no built-in camera; optional accessory required</div></section>
+<section class="card"><div class="label">Printer connection</div><div class="value" id="reach">Unknown</div><div class="sub" id="endpoint">Waiting for agent diagnostics</div></section>
+</div>
+<div class="notice"><b>Read-only mode:</b> printer status and temperatures are read from the local AD5X API. No print, movement, pause or cancel commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
-async function refresh(){try{const r=await fetch('/api/status');if(!r.ok)throw Error();const d=await r.json(),a=d.agent;
-document.getElementById('agent').innerHTML=a.online?'<span class="dot on"></span>Online':'<span class="dot"></span>Offline';
-document.getElementById('seen').textContent=a.last_seen?'Last seen: '+new Date(a.last_seen).toLocaleString():'No agent connected';
-document.getElementById('printer').textContent=a.printer_reachable===true?'Reachable':a.printer_reachable===false?'Unreachable':'Unknown';
-document.getElementById('reach').textContent=a.printer_host?(a.printer_host+':'+a.printer_port):'Waiting for local diagnostics';
-}catch(e){document.getElementById('agent').textContent='Unavailable'}}
-refresh();setInterval(refresh,5000);
+const el=id=>document.getElementById(id), temp=v=>Number.isFinite(v)?Math.round(v)+' °C':'—';
+async function refresh(){try{const r=await fetch('/api/status');if(!r.ok)throw Error();const a=(await r.json()).agent||{};
+el('agent').innerHTML=a.online?'<span class="dot on"></span>Online':'<span class="dot"></span>Offline';
+el('seen').textContent=a.last_seen?'Last seen: '+new Date(a.last_seen).toLocaleString():'No agent connected';
+el('state').textContent=a.printer_status||'Unknown';
+el('model').textContent=(a.printer_name||'Flashforge AD5X')+(a.firmware?' · '+a.firmware:'');
+const p=Number(a.progress);el('progress').textContent=Number.isFinite(p)?Math.round(p*100)+'%':'—';el('progressbar').style.width=Number.isFinite(p)?Math.max(0,Math.min(100,p*100))+'%':'0%';
+el('job').textContent=a.file_name||'No active job';
+el('nozzle').textContent=temp(a.nozzle_temp);el('nozzleTarget').textContent='Target '+temp(a.nozzle_target);
+el('bed').textContent=temp(a.bed_temp);el('bedTarget').textContent='Target '+temp(a.bed_target);
+el('layers').textContent=(a.layer??'—')+' / '+(a.total_layers??'—');
+el('time').textContent='Remaining '+(Number.isFinite(a.remaining_seconds)?Math.ceil(a.remaining_seconds/60)+' min':'—');
+el('camera').textContent=a.camera_available?'Accessory detected':'Not detected';
+el('reach').textContent=a.printer_reachable?'Connected':a.printer_reachable===false?'Unreachable':'Unknown';
+el('endpoint').textContent=a.printer_host?(a.printer_host+':8898'):(a.api_error||'Waiting for agent diagnostics');
+}catch(e){el('agent').textContent='Unavailable'}}
+refresh();setInterval(refresh,4000);
 </script></body></html>"""
 
 
@@ -115,6 +136,9 @@ async def agent_ws(ws: WebSocket):
         if not agent_id or len(agent_id) > 64:
             await ws.close(code=1008, reason="Invalid agent id")
             return
+        old = connections.get(agent_id)
+        if old and old is not ws:
+            await old.close(code=4001, reason="Agent reconnected")
         connections[agent_id] = ws
         while True:
             msg = await ws.receive_json()
@@ -122,9 +146,21 @@ async def agent_ws(ws: WebSocket):
                 continue
             payload = {
                 "printer_host": str(msg.get("printer_host", ""))[:128],
-                "printer_port": int(msg.get("printer_port", 0)),
                 "printer_reachable": msg.get("printer_reachable") if isinstance(msg.get("printer_reachable"), bool) else None,
-                "camera_configured": bool(msg.get("camera_configured", False)),
+                "api_error": str(msg.get("api_error", ""))[:160],
+                "printer_name": str(msg.get("printer_name", "Flashforge AD5X"))[:64],
+                "printer_status": str(msg.get("printer_status", "unknown"))[:32],
+                "firmware": str(msg.get("firmware", ""))[:32],
+                "progress": msg.get("progress") if isinstance(msg.get("progress"), (int, float)) else None,
+                "file_name": str(msg.get("file_name", ""))[:128],
+                "nozzle_temp": msg.get("nozzle_temp") if isinstance(msg.get("nozzle_temp"), (int, float)) else None,
+                "nozzle_target": msg.get("nozzle_target") if isinstance(msg.get("nozzle_target"), (int, float)) else None,
+                "bed_temp": msg.get("bed_temp") if isinstance(msg.get("bed_temp"), (int, float)) else None,
+                "bed_target": msg.get("bed_target") if isinstance(msg.get("bed_target"), (int, float)) else None,
+                "layer": msg.get("layer") if isinstance(msg.get("layer"), int) else None,
+                "total_layers": msg.get("total_layers") if isinstance(msg.get("total_layers"), int) else None,
+                "remaining_seconds": msg.get("remaining_seconds") if isinstance(msg.get("remaining_seconds"), (int, float)) else None,
+                "camera_available": bool(msg.get("camera_available", False)),
                 "agent_version": str(msg.get("agent_version", "unknown"))[:32],
             }
             seen = utcnow()
@@ -142,4 +178,4 @@ async def agent_ws(ws: WebSocket):
 
 @app.get("/api/version")
 async def version(_: str = Depends(admin_auth)):
-    return {"name": NAME, "version": "0.1.0"}
+    return {"name": NAME, "version": "0.2.0"}
