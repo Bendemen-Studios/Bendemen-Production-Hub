@@ -80,6 +80,7 @@ class FilamentInventoryTests(unittest.TestCase):
             "name": "eSUN PLA+ Black", "brand": "eSUN", "material": "PLA+",
             "color": "#222222", "spool_weight_g": 1000,
             "remaining_weight_g": 735, "notes": "Dry storage",
+            "shopping_url": "https://example.com/products/esun-pla-plus",
         }
 
     def test_normalizes_valid_filament(self):
@@ -105,6 +106,28 @@ class FilamentInventoryTests(unittest.TestCase):
         item["remaining_weight_g"] = True
         with self.assertRaises(ValueError):
             normalize_filament(item)
+
+
+    def test_accepts_https_shopping_link(self):
+        item = normalize_filament(self.valid_filament())
+        self.assertEqual(item["shopping_url"], "https://example.com/products/esun-pla-plus")
+
+    def test_shopping_link_is_optional(self):
+        data = self.valid_filament()
+        data.pop("shopping_url")
+        self.assertEqual(normalize_filament(data)["shopping_url"], "")
+
+    def test_rejects_non_http_shopping_link(self):
+        data = self.valid_filament()
+        data["shopping_url"] = "javascript:alert(1)"
+        with self.assertRaisesRegex(ValueError, "HTTP or HTTPS"):
+            normalize_filament(data)
+
+    def test_rejects_url_with_embedded_credentials(self):
+        data = self.valid_filament()
+        data["shopping_url"] = "https://user:pass@example.com/item"
+        with self.assertRaisesRegex(ValueError, "HTTP or HTTPS"):
+            normalize_filament(data)
 
 
 if __name__ == "__main__":
