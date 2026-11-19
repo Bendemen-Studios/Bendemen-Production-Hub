@@ -557,6 +557,9 @@ async def update_filament(filament_id: int, payload: dict, _: str = Depends(admi
 @app.delete("/api/filaments/{filament_id}")
 async def delete_filament(filament_id: int, _: str = Depends(admin_auth)):
     with database() as conn:
+        used = conn.execute("SELECT COUNT(*) FROM material_usage WHERE filament_id=?", (filament_id,)).fetchone()[0]
+        if used:
+            raise HTTPException(409, "This spool has recorded material usage and cannot be deleted.")
         cursor = conn.execute("DELETE FROM filaments WHERE id=?", (filament_id,))
         if cursor.rowcount == 0:
             raise HTTPException(404, "Filament not found")
