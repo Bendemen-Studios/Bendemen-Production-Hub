@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.9.0"
+VERSION = "1.0.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -295,7 +295,18 @@ async def startup():
             notes TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_sales_created ON print_sales(created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_sales_created ON print_sales(created_at DESC)")\n        conn.execute("""CREATE TABLE IF NOT EXISTS slicer_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_name TEXT NOT NULL,
+            slicer TEXT NOT NULL,
+            estimated_seconds INTEGER,
+            filament_grams REAL,
+            material TEXT,
+            total_layers INTEGER,
+            layer_height_mm REAL,
+            imported_at TEXT NOT NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_slicer_imports_imported ON slicer_imports(imported_at DESC)")
 
 
 def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -354,7 +365,7 @@ th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08
 footer{margin-top:28px;color:#747985;font-size:12px}
 @media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
 </style></head><body><main>
-<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.8.0</span></div>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v1.0.0</span></div>
 <div class="summary">
 <section class="metric"><div class="label">Printers registered</div><div class="metric-value" id="count">0</div></section>
 <section class="metric"><div class="label">Agents online</div><div class="metric-value" id="online">0</div></section>
