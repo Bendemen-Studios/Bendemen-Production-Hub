@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -122,8 +122,11 @@ def normalize_filament(data: dict) -> dict:
     notes = clean_text(data.get("notes"), 500)
     shopping_url = clean_text(data.get("shopping_url"), 500)
     purchase_price = safe_number(data.get("purchase_price_eur"))
+    low_stock_threshold = safe_number(data.get("low_stock_threshold_g", 200))
     if purchase_price is None or purchase_price < 0 or purchase_price > 100000:
         raise ValueError("Purchase price must be a valid amount in EUR.")
+    if low_stock_threshold is None or low_stock_threshold < 0 or low_stock_threshold > 100000:
+        raise ValueError("Minimum stock threshold must be a valid non-negative gram value.")
     if shopping_url:
         try:
             parsed_url = urlsplit(shopping_url)
@@ -152,13 +155,14 @@ def normalize_filament(data: dict) -> dict:
         "name": name, "brand": brand, "material": material, "color": color,
         "spool_weight_g": float(spool_weight), "remaining_weight_g": float(remaining),
         "notes": notes, "shopping_url": shopping_url, "purchase_price_eur": float(purchase_price),
+        "low_stock_threshold_g": float(low_stock_threshold),
     }
 
 
 def public_filament(row) -> dict:
     return {key: row[key] for key in (
         "id", "name", "brand", "material", "color",
-        "spool_weight_g", "remaining_weight_g", "notes", "shopping_url", "purchase_price_eur", "created_at", "updated_at"
+        "spool_weight_g", "remaining_weight_g", "notes", "shopping_url", "purchase_price_eur", "low_stock_threshold_g", "created_at", "updated_at"
     )}
 
 
@@ -223,6 +227,8 @@ async def startup():
             conn.execute("ALTER TABLE filaments ADD COLUMN shopping_url TEXT NOT NULL DEFAULT ''")
         if "purchase_price_eur" not in filament_columns:
             conn.execute("ALTER TABLE filaments ADD COLUMN purchase_price_eur REAL NOT NULL DEFAULT 0")
+        if "low_stock_threshold_g" not in filament_columns:
+            conn.execute("ALTER TABLE filaments ADD COLUMN low_stock_threshold_g REAL NOT NULL DEFAULT 200")
         conn.execute("""CREATE TABLE IF NOT EXISTS material_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             print_job_id INTEGER NOT NULL,
@@ -321,11 +327,19 @@ footer{margin-top:28px;color:#747985;font-size:12px}
   <div class="field"><label for="fil-remaining">Remaining filament (g) *</label><input id="fil-remaining" type="number" min="0" step="1" value="1000"></div>
   <div class="field"><label for="fil-price">Spool purchase price (€) *</label><input id="fil-price" type="number" min="0" step="0.01" value="0"></div>
   <div class="field"><label for="fil-shopping">Shopping link</label><input id="fil-shopping" type="url" maxlength="500" placeholder="https://shop.example.com/filament"></div>
+  <div class="field"><label for="fil-threshold">Low-stock warning (g)</label><input id="fil-threshold" type="number" min="0" step="1" value="200"></div>
  </div>
  <div class="field" style="margin-top:10px"><label for="fil-notes">Notes</label><textarea id="fil-notes" maxlength="500" placeholder="Nozzle temperature, storage location…"></textarea></div>
  <div class="actions"><button class="action primary" id="fil-save">Add filament</button><button class="action" id="fil-cancel" hidden>Cancel edit</button></div>
  <div class="form-message" id="fil-message">Keep track of spool stock manually. Automatic consumption is not enabled yet.</div>
 </div>
+<div class="summary">
+ <section class="metric"><div class="label">Remaining stock</div><div class="metric-value" id="stock-grams">0 g</div></section>
+ <section class="metric"><div class="label">Stock value</div><div class="metric-value" id="stock-value">€0.00</div></section>
+ <section class="metric"><div class="label">Low-stock spools</div><div class="metric-value" id="stock-low">0</div></section>
+ <section class="metric"><div class="label">Filament products</div><div class="metric-value" id="product-count">0</div></section>
+</div>
+<div class="history-wrap" id="product-groups"><div class="empty">Loading product overview…</div></div>
 <div class="inventory-grid" id="filaments"><div class="empty">Loading filament stock…</div></div>
 <h2 class="section">Material use & costs</h2>
 <div class="summary">
@@ -361,6 +375,8 @@ footer{margin-top:28px;color:#747985;font-size:12px}
  <div class="form-message" id="sale-message">Material costs are taken from recorded filament usage. Add electricity, packaging or other expenses as additional costs.</div>
 </div>
 <div class="history-wrap" id="sales-history"><div class="empty">No sales recorded yet.</div></div>
+<h2 class="section">Monthly financial reports</h2>
+<div class="history-wrap" id="monthly-reports"><div class="empty">Loading monthly reports…</div></div>
 <h2 class="section">Print history</h2><div class="history-wrap" id="history"><div class="empty">No print jobs recorded yet.</div></div><div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
@@ -406,6 +422,8 @@ function filamentCard(f){
  top.append(swatch,info);card.append(top);
  const percent=f.spool_weight_g>0?Math.max(0,Math.min(100,f.remaining_weight_g/f.spool_weight_g*100)):0;
  card.append(node('div','filament-meta',Math.round(f.remaining_weight_g)+' g remaining · '+Math.round(percent)+'% of '+Math.round(f.spool_weight_g)+' g'));
+ if(Number(f.remaining_weight_g)<=Number(f.low_stock_threshold_g||0))card.append(node('div','filament-meta','⚠ Low stock · reorder threshold '+Math.round(f.low_stock_threshold_g)+' g'));
+ card.append(node('div','filament-meta','Remaining stock value: €'+Number(f.remaining_value_eur||0).toFixed(2)));
  const bar=node('div','stockbar'),fill=node('div','stockfill');fill.style.width=percent+'%';bar.append(fill);card.append(bar);
  card.append(node('div','filament-meta','Spool price: €'+Number(f.purchase_price_eur||0).toFixed(2)+' · €'+(Number(f.purchase_price_eur||0)/Number(f.spool_weight_g||1)).toFixed(4)+'/g'));
  if(f.notes)card.append(node('div','filament-meta',f.notes));
@@ -419,26 +437,39 @@ function filamentCard(f){
 async function refreshFilaments(){
  const target=$('filaments');
  try{const r=await fetch('/api/filaments',{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();target.replaceChildren();
+  $('stock-grams').textContent=Number(data.summary.remaining_grams).toFixed(0)+' g';
+  $('stock-value').textContent=euro(data.summary.remaining_value_eur);
+  $('stock-low').textContent=data.summary.low_stock_spools;
+  $('product-count').textContent=data.summary.product_count;
+  const groups=$('product-groups');groups.replaceChildren();
+  if(!data.products.length)groups.append(node('div','empty','No filament products yet.'));
+  else{
+   const table=node('table',''),thead=node('thead',''),hr=node('tr','');
+   ['Product','Spools','Remaining','Stock value','Status'].forEach(x=>hr.append(node('th','',x)));
+   thead.append(hr);table.append(thead);const body=node('tbody','');
+   data.products.forEach(p=>{const tr=node('tr','');[p.product_name,p.spools,p.remaining_grams.toFixed(0)+' g',euro(p.remaining_value_eur),p.low_stock_spools? p.low_stock_spools+' low-stock':'In stock'].forEach(x=>tr.append(node('td','',String(x))));body.append(tr)});
+   table.append(body);groups.append(table);
+  }
   if(!data.filaments.length){target.append(node('div','empty','No filament spools added yet.'));return}
   data.filaments.forEach(f=>target.append(filamentCard(f)));
  }catch(e){target.textContent='Could not load filament inventory'}
 }
 function resetFilamentForm(){
  editingFilament=null;
- ['fil-name','fil-brand','fil-color','fil-notes','fil-shopping'].forEach(id=>$(id).value='');$('fil-price').value='0';
+ ['fil-name','fil-brand','fil-color','fil-notes','fil-shopping'].forEach(id=>$(id).value='');$('fil-price').value='0';$('fil-threshold').value='200';
  $('fil-material').value='PLA';$('fil-spool').value='1000';$('fil-remaining').value='1000';
  $('fil-save').textContent='Add filament';$('fil-cancel').hidden=true;
 }
 function editFilament(f){
  editingFilament=f.id;
  $('fil-name').value=f.name;$('fil-brand').value=f.brand;$('fil-material').value=f.material;
- $('fil-color').value=f.color;$('fil-shopping').value=f.shopping_url||'';$('fil-price').value=f.purchase_price_eur||0;$('fil-spool').value=f.spool_weight_g;$('fil-remaining').value=f.remaining_weight_g;$('fil-notes').value=f.notes;
+ $('fil-color').value=f.color;$('fil-shopping').value=f.shopping_url||'';$('fil-price').value=f.purchase_price_eur||0;$('fil-threshold').value=f.low_stock_threshold_g??200;$('fil-spool').value=f.spool_weight_g;$('fil-remaining').value=f.remaining_weight_g;$('fil-notes').value=f.notes;
  $('fil-save').textContent='Save changes';$('fil-cancel').hidden=false;$('fil-message').textContent='Editing '+f.name;
  $('fil-name').focus();window.scrollTo({top:0,behavior:'smooth'});
 }
 async function saveFilament(){
  const payload={name:$('fil-name').value,brand:$('fil-brand').value,material:$('fil-material').value,color:$('fil-color').value,
-  spool_weight_g:Number($('fil-spool').value),remaining_weight_g:Number($('fil-remaining').value),notes:$('fil-notes').value,shopping_url:$('fil-shopping').value,purchase_price_eur:Number($('fil-price').value)};
+  spool_weight_g:Number($('fil-spool').value),remaining_weight_g:Number($('fil-remaining').value),notes:$('fil-notes').value,shopping_url:$('fil-shopping').value,purchase_price_eur:Number($('fil-price').value),low_stock_threshold_g:Number($('fil-threshold').value)};
  $('fil-save').disabled=true;
  try{const r=await fetch(editingFilament?'/api/filaments/'+editingFilament:'/api/filaments',{method:editingFilament?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await r.json();if(!r.ok)throw Error(data.detail||'Could not save filament');
@@ -544,6 +575,18 @@ async function recordSale(){
  finally{$('sale-save').disabled=false}
 }
 $('sale-save').addEventListener('click',recordSale);
+async function refreshMonthlyReports(){
+ try{
+  const r=await fetch('/api/reports/monthly?months=12',{cache:'no-store'});if(!r.ok)throw Error();
+  const data=await r.json(),target=$('monthly-reports');target.replaceChildren();
+  if(!data.reports.length){target.append(node('div','empty','No monthly sales reports yet.'));return}
+  const table=node('table',''),thead=node('thead',''),head=node('tr','');
+  ['Month','Sales','Revenue','Material','Other costs','Total costs','Profit'].forEach(x=>head.append(node('th','',x)));
+  thead.append(head);table.append(thead);const body=node('tbody','');
+  data.reports.forEach(x=>{const tr=node('tr','');[x.month,x.sales,euro(x.revenue_eur),euro(x.material_cost_eur),euro(x.extra_costs_eur),euro(x.total_costs_eur),euro(x.profit_eur)].forEach((v,i)=>{const td=node('td','',String(v));if(i===6)td.style.color=Number(x.profit_eur)>=0?'#9ce2bb':'#efaaaa';tr.append(td)});body.append(tr)});
+  table.append(body);target.append(table);
+ }catch(e){$('monthly-reports').textContent='Could not load monthly reports.'}
+}
 async function refreshHistory(){
  try{
   const r=await fetch('/api/history?limit=20',{cache:'no-store'});if(!r.ok)throw Error();
@@ -573,7 +616,7 @@ async function refresh(){
   else agents.forEach(a=>target.append(printerCard(a)));
  }catch(e){$('hub').textContent='Unavailable';$('updated').textContent='Could not load printer status'}
 }
-refresh();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();refreshSalesOptions();refreshSales();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);setInterval(refreshSales,30000);setInterval(refreshSalesOptions,30000);
+refresh();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();refreshSalesOptions();refreshSales();refreshMonthlyReports();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);setInterval(refreshSales,30000);setInterval(refreshSalesOptions,30000);setInterval(refreshMonthlyReports,60000);
 </script></body></html>"""
 
 
@@ -599,7 +642,35 @@ async def status(_: str = Depends(admin_auth)):
 async def list_filaments(_: str = Depends(admin_auth)):
     with database() as conn:
         rows = conn.execute("SELECT * FROM filaments ORDER BY updated_at DESC, id DESC").fetchall()
-    return {"filaments": [public_filament(row) for row in rows]}
+    filaments = []
+    for row in rows:
+        item = public_filament(row)
+        item["remaining_value_eur"] = round(
+            item["remaining_weight_g"] * item["purchase_price_eur"] / item["spool_weight_g"], 2
+        )
+        filaments.append(item)
+    products = {}
+    for item in filaments:
+        key = (item["name"].casefold(), item["brand"].casefold(), item["material"], item["color"].casefold())
+        if key not in products:
+            products[key] = {
+                "product_name": " ".join(x for x in (item["brand"], item["name"]) if x),
+                "spools": 0, "remaining_grams": 0.0, "remaining_value_eur": 0.0,
+                "low_stock_spools": 0,
+            }
+        group = products[key]
+        group["spools"] += 1
+        group["remaining_grams"] += item["remaining_weight_g"]
+        group["remaining_value_eur"] += item["remaining_value_eur"]
+        if item["remaining_weight_g"] <= item["low_stock_threshold_g"]:
+            group["low_stock_spools"] += 1
+    summary = {
+        "remaining_grams": round(sum(x["remaining_weight_g"] for x in filaments), 2),
+        "remaining_value_eur": round(sum(x["remaining_value_eur"] for x in filaments), 2),
+        "low_stock_spools": sum(1 for x in filaments if x["remaining_weight_g"] <= x["low_stock_threshold_g"]),
+        "product_count": len(products),
+    }
+    return {"filaments": filaments, "products": list(products.values()), "summary": summary}
 
 
 @app.post("/api/filaments")
@@ -802,6 +873,33 @@ async def create_sale(payload: dict, _: str = Depends(admin_auth)):
     sale = dict(row)
     sale.update(calculate_sale_totals(float(sale_price), float(material_cost), float(extra_costs)))
     return {"sale": sale}
+
+
+@app.get("/api/reports/monthly")
+async def monthly_reports(months: int = 12, _: str = Depends(admin_auth)):
+    months = max(1, min(months, 36))
+    with database() as conn:
+        rows = conn.execute(
+            """SELECT substr(s.created_at,1,7) AS month,COUNT(*) AS sales,
+                      SUM(s.sale_price_eur) AS revenue_eur,
+                      SUM(s.extra_costs_eur) AS extra_costs_eur,
+                      SUM(COALESCE(u.material_cost_eur,0)) AS material_cost_eur
+               FROM print_sales s
+               LEFT JOIN (
+                   SELECT print_job_id,SUM(cost_eur) AS material_cost_eur
+                   FROM material_usage GROUP BY print_job_id
+               ) u ON u.print_job_id=s.print_job_id
+               GROUP BY substr(s.created_at,1,7)
+               ORDER BY month DESC LIMIT ?""",
+            (months,),
+        ).fetchall()
+    reports = []
+    for row in rows:
+        item = dict(row)
+        item["total_costs_eur"] = round(item["material_cost_eur"] + item["extra_costs_eur"], 2)
+        item["profit_eur"] = round(item["revenue_eur"] - item["total_costs_eur"], 2)
+        reports.append(item)
+    return {"reports": reports}
 
 
 @app.get("/api/history")
