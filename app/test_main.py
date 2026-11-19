@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from app.main import clean_text, public_agent, record_print_update, safe_number
+from app.main import clean_text, normalize_filament, public_agent, record_print_update, safe_number
 
 
 class HubStatusTests(unittest.TestCase):
@@ -71,6 +71,40 @@ class PrintHistoryTests(unittest.TestCase):
         self.assertIsNotNone(rows[0]["ended_at"])
         self.assertIsNone(rows[1]["ended_at"])
         self.assertEqual(rows[1]["file_name"], "second.3mf")
+
+
+
+class FilamentInventoryTests(unittest.TestCase):
+    def valid_filament(self):
+        return {
+            "name": "eSUN PLA+ Black", "brand": "eSUN", "material": "PLA+",
+            "color": "#222222", "spool_weight_g": 1000,
+            "remaining_weight_g": 735, "notes": "Dry storage",
+        }
+
+    def test_normalizes_valid_filament(self):
+        item = normalize_filament(self.valid_filament())
+        self.assertEqual(item["name"], "eSUN PLA+ Black")
+        self.assertEqual(item["material"], "PLA+")
+        self.assertEqual(item["remaining_weight_g"], 735.0)
+
+    def test_rejects_remaining_weight_above_spool_weight(self):
+        item = self.valid_filament()
+        item["remaining_weight_g"] = 1001
+        with self.assertRaisesRegex(ValueError, "cannot exceed"):
+            normalize_filament(item)
+
+    def test_rejects_unknown_material(self):
+        item = self.valid_filament()
+        item["material"] = "MAGIC"
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            normalize_filament(item)
+
+    def test_rejects_boolean_weight(self):
+        item = self.valid_filament()
+        item["remaining_weight_g"] = True
+        with self.assertRaises(ValueError):
+            normalize_filament(item)
 
 
 if __name__ == "__main__":
