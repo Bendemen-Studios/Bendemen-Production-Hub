@@ -8,6 +8,17 @@ class FlashForgeError(RuntimeError):
     pass
 
 
+def is_ad5x_pid(value) -> bool:
+    # Community API docs describe PID 38 decimal; some firmware payloads encode it as hex "26".
+    if isinstance(value, int):
+        return value == 38
+    raw = str(value or "").strip().lower()
+    try:
+        return int(raw, 16 if raw.startswith("0x") or raw == "26" else 10) == 38
+    except ValueError:
+        return False
+
+
 class FlashForgeAD5X:
     def __init__(self, host: str, serial: str, check_code: str, port: int = 8898, timeout: float = 5):
         self.host = host
@@ -32,9 +43,8 @@ class FlashForgeAD5X:
         if payload.get("code") != 0 or not isinstance(payload.get("detail"), dict):
             raise FlashForgeError(str(payload.get("message", "Unexpected AD5X API response")))
         detail = payload["detail"]
-        # PID 38 is the AD5X. Do not silently label another Flashforge model as AD5X.
         pid = detail.get("pid")
-        if pid is not None and str(pid).lower() not in ("38", "0x26"):
+        if pid is not None and not is_ad5x_pid(pid):
             raise FlashForgeError(f"Unexpected Flashforge product ID: {pid}")
         return detail
 
