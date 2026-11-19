@@ -1,0 +1,22 @@
+[Unit]
+Description=Bendemen Production Hub Local Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=bendemen-agent
+Group=bendemen-agent
+WorkingDirectory=/opt/bendemen-production-hub/agent
+EnvironmentFile=/opt/bendemen-production-hub/agent/.env
+ExecStart=/opt/bendemen-production-hub/agent/.venv/bin/python /opt/bendemen-production-hub/agent/agent.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bendemen-production-hub/agent
+
+[Install]
+WantedBy=multi-user.target
