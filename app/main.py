@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -221,6 +221,15 @@ async def startup():
             UNIQUE(print_job_id, filament_id)
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_material_usage_created ON material_usage(created_at DESC)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS print_sales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            print_job_id INTEGER NOT NULL UNIQUE,
+            sale_price_eur REAL NOT NULL,
+            extra_costs_eur REAL NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_sales_created ON print_sales(created_at DESC)")
 
 
 def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -321,6 +330,24 @@ footer{margin-top:28px;color:#747985;font-size:12px}
  <div class="form-message" id="usage-message">Enter the grams used for a print. The Hub calculates cost and subtracts the material from stock.</div>
 </div>
 <div class="history-wrap" id="usage-history"><div class="empty">No material use recorded yet.</div></div>
+<h2 class="section">Sales & profitability</h2>
+<div class="summary">
+ <section class="metric"><div class="label">Revenue</div><div class="metric-value" id="sales-revenue">€0.00</div></section>
+ <section class="metric"><div class="label">Total costs</div><div class="metric-value" id="sales-costs">€0.00</div></section>
+ <section class="metric"><div class="label">Profit</div><div class="metric-value" id="sales-profit">€0.00</div></section>
+ <section class="metric"><div class="label">Sold prints</div><div class="metric-value" id="sales-count">0</div></section>
+</div>
+<div class="inventory-form">
+ <div class="form-grid">
+  <div class="field"><label for="sale-job">Print job *</label><select id="sale-job"><option value="">Loading print jobs…</option></select></div>
+  <div class="field"><label for="sale-price">Sale price (€) *</label><input id="sale-price" type="number" min="0" step="0.01" placeholder="e.g. 4.99"></div>
+  <div class="field"><label for="sale-extra">Additional costs (€)</label><input id="sale-extra" type="number" min="0" step="0.01" value="0"></div>
+ </div>
+ <div class="field" style="margin-top:10px"><label for="sale-notes">Notes</label><input id="sale-notes" maxlength="500" placeholder="Customer, order reference, shipping…"></div>
+ <div class="actions"><button class="action primary" id="sale-save">Record sale</button></div>
+ <div class="form-message" id="sale-message">Material costs are taken from recorded filament usage. Add electricity, packaging or other expenses as additional costs.</div>
+</div>
+<div class="history-wrap" id="sales-history"><div class="empty">No sales recorded yet.</div></div>
 <h2 class="section">Print history</h2><div class="history-wrap" id="history"><div class="empty">No print jobs recorded yet.</div></div><div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
@@ -458,6 +485,52 @@ async function recordUsage(){
  finally{$('usage-save').disabled=false}
 }
 $('usage-save').addEventListener('click',recordUsage);
+
+async function refreshSalesOptions(){
+ try{
+  const r=await fetch('/api/consumption/options',{cache:'no-store'});if(!r.ok)throw Error();
+  const data=await r.json(),select=$('sale-job'),old=select.value;
+  select.replaceChildren();select.append(new Option('Choose a print job',''));
+  data.jobs.forEach(j=>select.append(new Option(j.file_name+' · '+new Date(j.started_at).toLocaleString()+' · '+j.result,j.id)));
+  if([...select.options].some(o=>o.value===old))select.value=old;
+ }catch(e){$('sale-message').textContent='Could not load print jobs.'}
+}
+async function refreshSales(){
+ try{
+  const r=await fetch('/api/sales',{cache:'no-store'});if(!r.ok)throw Error();
+  const data=await r.json(),summary=data.summary;
+  $('sales-revenue').textContent=euro(summary.revenue_eur);
+  $('sales-costs').textContent=euro(summary.total_costs_eur);
+  $('sales-profit').textContent=euro(summary.profit_eur);
+  $('sales-count').textContent=summary.sales;
+  const target=$('sales-history');target.replaceChildren();
+  if(!data.sales.length){target.append(node('div','empty','No sales recorded yet.'));return}
+  const table=node('table',''),thead=node('thead',''),head=node('tr','');
+  ['Print','Sale price','Material','Extra costs','Total costs','Profit','Date'].forEach(x=>head.append(node('th','',x)));
+  thead.append(head);table.append(thead);const body=node('tbody','');
+  data.sales.forEach(x=>{
+   const tr=node('tr','');
+   [x.file_name,euro(x.sale_price_eur),euro(x.material_cost_eur),euro(x.extra_costs_eur),euro(x.total_costs_eur),euro(x.profit_eur),new Date(x.created_at).toLocaleString()].forEach((v,i)=>{
+    const td=node('td','',v);if(i===5)td.style.color=Number(x.profit_eur)>=0?'#9ce2bb':'#efaaaa';tr.append(td);
+   });
+   body.append(tr);
+  });
+  table.append(body);target.append(table);
+ }catch(e){$('sales-history').textContent='Could not load sales overview.'}
+}
+async function recordSale(){
+ const payload={print_job_id:Number($('sale-job').value),sale_price_eur:Number($('sale-price').value),extra_costs_eur:Number($('sale-extra').value||0),notes:$('sale-notes').value};
+ $('sale-save').disabled=true;
+ try{
+  const r=await fetch('/api/sales',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await r.json();if(!r.ok)throw Error(data.detail||'Could not record sale');
+  $('sale-message').textContent='Sale recorded. Estimated profit: '+euro(data.sale.profit_eur)+'.';
+  $('sale-price').value='';$('sale-extra').value='0';$('sale-notes').value='';
+  await Promise.all([refreshSales(),refreshSalesOptions()]);
+ }catch(e){$('sale-message').textContent=e.message}
+ finally{$('sale-save').disabled=false}
+}
+$('sale-save').addEventListener('click',recordSale);
 async function refreshHistory(){
  try{
   const r=await fetch('/api/history?limit=20',{cache:'no-store'});if(!r.ok)throw Error();
@@ -487,7 +560,7 @@ async function refresh(){
   else agents.forEach(a=>target.append(printerCard(a)));
  }catch(e){$('hub').textContent='Unavailable';$('updated').textContent='Could not load printer status'}
 }
-refresh();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);
+refresh();refreshHistory();refreshFilaments();refreshUsageOptions();refreshUsage();refreshSalesOptions();refreshSales();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);setInterval(refreshUsage,30000);setInterval(refreshUsageOptions,30000);setInterval(refreshSales,30000);setInterval(refreshSalesOptions,30000);
 </script></body></html>"""
 
 
@@ -639,6 +712,87 @@ async def create_consumption(payload: dict, _: str = Depends(admin_auth)):
             (cursor.lastrowid,),
         ).fetchone()
     return {"entry": dict(row)}
+
+
+
+@app.get("/api/sales")
+async def list_sales(_: str = Depends(admin_auth)):
+    with database() as conn:
+        rows = conn.execute(
+            """SELECT s.id,s.print_job_id,s.sale_price_eur,s.extra_costs_eur,s.notes,s.created_at,
+                      p.file_name,
+                      COALESCE(SUM(u.cost_eur),0) AS material_cost_eur
+               FROM print_sales s
+               JOIN print_jobs p ON p.id=s.print_job_id
+               LEFT JOIN material_usage u ON u.print_job_id=s.print_job_id
+               GROUP BY s.id
+               ORDER BY s.created_at DESC LIMIT 200"""
+        ).fetchall()
+        totals = conn.execute(
+            """SELECT COUNT(*) AS sales,COALESCE(SUM(s.sale_price_eur),0) AS revenue_eur,
+                      COALESCE(SUM(s.extra_costs_eur),0) AS extra_costs_eur
+               FROM print_sales s"""
+        ).fetchone()
+        material_total = conn.execute(
+            """SELECT COALESCE(SUM(u.cost_eur),0) AS material_cost_eur
+               FROM material_usage u JOIN print_sales s ON s.print_job_id=u.print_job_id"""
+        ).fetchone()["material_cost_eur"]
+    sales = []
+    for row in rows:
+        item = dict(row)
+        item["total_costs_eur"] = round(item["material_cost_eur"] + item["extra_costs_eur"], 2)
+        item["profit_eur"] = round(item["sale_price_eur"] - item["total_costs_eur"], 2)
+        sales.append(item)
+    revenue = float(totals["revenue_eur"])
+    costs = float(material_total) + float(totals["extra_costs_eur"])
+    return {
+        "summary": {
+            "sales": totals["sales"], "revenue_eur": round(revenue, 2),
+            "total_costs_eur": round(costs, 2), "profit_eur": round(revenue - costs, 2),
+        },
+        "sales": sales,
+    }
+
+
+@app.post("/api/sales")
+async def create_sale(payload: dict, _: str = Depends(admin_auth)):
+    job_id = payload.get("print_job_id")
+    sale_price = safe_number(payload.get("sale_price_eur"))
+    extra_costs = safe_number(payload.get("extra_costs_eur", 0))
+    notes = clean_text(payload.get("notes"), 500)
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+        raise HTTPException(400, "Choose a valid print job.")
+    if sale_price is None or sale_price < 0 or sale_price > 10000000:
+        raise HTTPException(400, "Sale price must be a valid non-negative EUR amount.")
+    if extra_costs is None or extra_costs < 0 or extra_costs > 10000000:
+        raise HTTPException(400, "Additional costs must be a valid non-negative EUR amount.")
+    now = utcnow()
+    with database() as conn:
+        job = conn.execute("SELECT id FROM print_jobs WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise HTTPException(404, "Print job not found.")
+        material_cost = conn.execute(
+            "SELECT COALESCE(SUM(cost_eur),0) FROM material_usage WHERE print_job_id=?",
+            (job_id,),
+        ).fetchone()[0]
+        try:
+            cursor = conn.execute(
+                """INSERT INTO print_sales(print_job_id,sale_price_eur,extra_costs_eur,notes,created_at)
+                   VALUES(?,?,?,?,?)""",
+                (job_id, float(sale_price), float(extra_costs), notes, now),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(409, "A sale is already registered for this print.") from exc
+        row = conn.execute(
+            "SELECT s.id,s.print_job_id,s.sale_price_eur,s.extra_costs_eur,s.notes,s.created_at,p.file_name FROM print_sales s JOIN print_jobs p ON p.id=s.print_job_id WHERE s.id=?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    total_costs = round(float(material_cost) + float(extra_costs), 2)
+    sale = dict(row)
+    sale["material_cost_eur"] = round(float(material_cost), 2)
+    sale["total_costs_eur"] = total_costs
+    sale["profit_eur"] = round(float(sale_price) - total_costs, 2)
+    return {"sale": sale}
 
 
 @app.get("/api/history")
