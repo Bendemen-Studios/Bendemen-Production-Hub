@@ -1,6 +1,6 @@
 # Bendemen Production Hub
 
-Self-hosted production and 3D-printer management. MVP v0.8 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history, filament inventory and manual material-consumption/cost tracking. The first supported printer integration is the Flashforge AD5X.
+Self-hosted production and 3D-printer management. MVP v0.9 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history, filament inventory and manual material-consumption/cost tracking. The first supported printer integration is the Flashforge AD5X.
 
 ## VPS deployment
 
@@ -117,3 +117,14 @@ Before multi-user production use, add per-user authorization, audit logging, rat
 A print job can be registered as a sale with a sale price, additional costs and optional notes. The Hub calculates revenue, material costs from the filament usage entries linked to that print, total costs and profit. The dashboard shows totals and a per-print sales table. Additional costs can include electricity, packaging, shipping or other expenses; enter the combined amount for now.
 
 Sales are recorded once per print job. A print job can have only one sale entry. Material usage added later is reflected in the sale's material-cost and profit calculation. This is a basic production ledger, not a full accounting or VAT system. Revenue is the entered sale price; taxes, payment fees, labor and depreciation are not calculated automatically.
+
+
+## Inventory valuation and low-stock alerts
+
+Every filament spool has an editable low-stock warning threshold in grams (default: 200 g). The dashboard marks spools at or below that threshold and shows the remaining stock value, calculated proportionally from the spool purchase price and original weight. The inventory summary shows total remaining grams, remaining stock value, low-stock spool count and product count.
+
+Spools with matching name, brand, material and color are grouped in a product overview, while each spool remains independently editable and traceable. This supports multiple rolls of the same filament product without merging their individual stock balances.
+
+## Monthly financial reports
+
+The dashboard includes monthly sales reports for up to the last 36 months (12 months shown by default). Each month shows the number of registered sales, revenue, filament material costs, additional costs, total costs and calculated profit. Reports are based on sale registration dates. Only registered sales are included; unsold prints and unrecorded expenses are not automatically estimated.
