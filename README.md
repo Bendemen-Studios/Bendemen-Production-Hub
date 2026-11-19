@@ -1,6 +1,6 @@
 # Bendemen Production Hub
 
-Self-hosted production and 3D-printer management. MVP v0.2 provides read-only live telemetry from a Flashforge AD5X through a local agent.
+Self-hosted production and 3D-printer management. MVP v0.3 provides a multi-printer dashboard and read-only live telemetry from local agents. The first supported printer integration is the Flashforge AD5X.
 
 ## VPS deployment
 
@@ -71,6 +71,10 @@ sudo journalctl -u bendemen-agent -f
 \`\`\`
 
 If you cloned elsewhere, update the paths in the service unit first.
+
+## Multiple printers
+
+The Hub stores one status record per unique agent ID and shows all registered printers on the dashboard. Give every physical printer/agent its own unique `HUB_AGENT_ID` and a local agent configuration. The current printer API adapter is Flashforge AD5X; additional printer brands (such as Elegoo) need their own protocol adapter before they can report telemetry.
 
 ## AD5X API
 
