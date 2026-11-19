@@ -1,6 +1,6 @@
 # Bendemen Production Hub
 
-Self-hosted production and 3D-printer management. MVP v0.5 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history and manual filament inventory management. The first supported printer integration is the Flashforge AD5X.
+Self-hosted production and 3D-printer management. MVP v0.6 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history and manual filament inventory management with product links. The first supported printer integration is the Flashforge AD5X.
 
 ## VPS deployment
 
@@ -79,6 +79,8 @@ The Hub records a print session when the AD5X reports a printing state, tracks p
 ## Filament inventory
 
 The dashboard includes a manual filament stock register. Add a spool with its name, brand, material, color, original spool weight and current remaining weight. Existing spools can be edited or deleted. Supported material labels are PLA, PLA+, PETG, ABS, ASA, TPU, NYLON, PC and OTHER.
+
+Each spool can also store an optional HTTP/HTTPS shopping link to its product page. The dashboard displays a product/reorder link on that spool card. Existing inventory records are migrated automatically when the Hub starts.
 
 Stock is currently maintained manually in grams. The Hub does not estimate or subtract filament consumption from print jobs because the current AD5X telemetry adapter does not provide a verified per-job material usage value. No spool is changed automatically when a print starts or finishes.
 
