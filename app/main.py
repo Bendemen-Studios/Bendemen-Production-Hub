@@ -342,7 +342,8 @@ async def startup():
             notes TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_sales_created ON print_sales(created_at DESC)")\n        conn.execute("""CREATE TABLE IF NOT EXISTS slicer_imports (
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_sales_created ON print_sales(created_at DESC)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS slicer_imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             file_name TEXT NOT NULL,
             slicer TEXT NOT NULL,
