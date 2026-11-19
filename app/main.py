@@ -56,6 +56,19 @@ def clean_text(value, limit=128):
     return str(value or "").strip()[:limit]
 
 
+def calculate_sale_totals(sale_price, material_cost, extra_costs):
+    values = [safe_number(value) for value in (sale_price, material_cost, extra_costs)]
+    if any(value is None or value < 0 for value in values):
+        raise ValueError("Sale amounts and costs must be valid non-negative EUR amounts.")
+    sale, material, extra = values
+    total_costs = round(material + extra, 2)
+    return {
+        "material_cost_eur": round(material, 2),
+        "total_costs_eur": total_costs,
+        "profit_eur": round(sale - total_costs, 2),
+    }
+
+
 
 def is_printing(status: str) -> bool:
     value = clean_text(status, 32).lower()
@@ -288,7 +301,7 @@ th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08
 footer{margin-top:28px;color:#747985;font-size:12px}
 @media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
 </style></head><body><main>
-<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.7.0</span></div>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.8.0</span></div>
 <div class="summary">
 <section class="metric"><div class="label">Printers registered</div><div class="metric-value" id="count">0</div></section>
 <section class="metric"><div class="label">Agents online</div><div class="metric-value" id="online">0</div></section>
@@ -740,8 +753,7 @@ async def list_sales(_: str = Depends(admin_auth)):
     sales = []
     for row in rows:
         item = dict(row)
-        item["total_costs_eur"] = round(item["material_cost_eur"] + item["extra_costs_eur"], 2)
-        item["profit_eur"] = round(item["sale_price_eur"] - item["total_costs_eur"], 2)
+        item.update(calculate_sale_totals(item["sale_price_eur"], item["material_cost_eur"], item["extra_costs_eur"]))
         sales.append(item)
     revenue = float(totals["revenue_eur"])
     costs = float(material_total) + float(totals["extra_costs_eur"])
@@ -787,11 +799,8 @@ async def create_sale(payload: dict, _: str = Depends(admin_auth)):
             "SELECT s.id,s.print_job_id,s.sale_price_eur,s.extra_costs_eur,s.notes,s.created_at,p.file_name FROM print_sales s JOIN print_jobs p ON p.id=s.print_job_id WHERE s.id=?",
             (cursor.lastrowid,),
         ).fetchone()
-    total_costs = round(float(material_cost) + float(extra_costs), 2)
     sale = dict(row)
-    sale["material_cost_eur"] = round(float(material_cost), 2)
-    sale["total_costs_eur"] = total_costs
-    sale["profit_eur"] = round(float(sale_price) - total_costs, 2)
+    sale.update(calculate_sale_totals(float(sale_price), float(material_cost), float(extra_costs)))
     return {"sale": sale}
 
 
