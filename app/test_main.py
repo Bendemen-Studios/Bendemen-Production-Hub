@@ -80,7 +80,7 @@ class FilamentInventoryTests(unittest.TestCase):
             "name": "eSUN PLA+ Black", "brand": "eSUN", "material": "PLA+",
             "color": "#222222", "spool_weight_g": 1000,
             "remaining_weight_g": 735, "notes": "Dry storage",
-            "shopping_url": "https://example.com/products/esun-pla-plus",
+            "shopping_url": "https://example.com/products/esun-pla-plus", "purchase_price_eur": 24.99,
         }
 
     def test_normalizes_valid_filament(self):
@@ -88,6 +88,7 @@ class FilamentInventoryTests(unittest.TestCase):
         self.assertEqual(item["name"], "eSUN PLA+ Black")
         self.assertEqual(item["material"], "PLA+")
         self.assertEqual(item["remaining_weight_g"], 735.0)
+        self.assertEqual(item["purchase_price_eur"], 24.99)
 
     def test_rejects_remaining_weight_above_spool_weight(self):
         item = self.valid_filament()
@@ -127,6 +128,19 @@ class FilamentInventoryTests(unittest.TestCase):
         data = self.valid_filament()
         data["shopping_url"] = "https://user:pass@example.com/item"
         with self.assertRaisesRegex(ValueError, "HTTP or HTTPS"):
+            normalize_filament(data)
+
+
+    def test_rejects_negative_purchase_price(self):
+        data = self.valid_filament()
+        data["purchase_price_eur"] = -1
+        with self.assertRaisesRegex(ValueError, "Purchase price"):
+            normalize_filament(data)
+
+    def test_rejects_boolean_purchase_price(self):
+        data = self.valid_filament()
+        data["purchase_price_eur"] = True
+        with self.assertRaisesRegex(ValueError, "Purchase price"):
             normalize_filament(data)
 
 
