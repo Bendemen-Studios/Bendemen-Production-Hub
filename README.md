@@ -1,6 +1,6 @@
 # Bendemen Production Hub
 
-Self-hosted production and 3D-printer management. MVP v0.7 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history, filament inventory and manual material-consumption/cost tracking. The first supported printer integration is the Flashforge AD5X.
+Self-hosted production and 3D-printer management. MVP v0.8 provides a Flashforge AD5X dashboard, read-only live telemetry, persistent print history, filament inventory and manual material-consumption/cost tracking. The first supported printer integration is the Flashforge AD5X.
 
 ## VPS deployment
 
@@ -110,3 +110,10 @@ The AD5X does not have a built-in camera. An optional compatible camera is requi
 - Keep both \`.env\` files private and use unique random secrets.
 
 Before multi-user production use, add per-user authorization, audit logging, rate limiting, token rotation and PostgreSQL.
+
+
+## Sales and profitability
+
+A print job can be registered as a sale with a sale price, additional costs and optional notes. The Hub calculates revenue, material costs from the filament usage entries linked to that print, total costs and profit. The dashboard shows totals and a per-print sales table. Additional costs can include electricity, packaging, shipping or other expenses; enter the combined amount for now.
+
+Sales are recorded once per print job. A print job can have only one sale entry. Material usage added later is reflected in the sale's material-cost and profit calculation. This is a basic production ledger, not a full accounting or VAT system. Revenue is the entered sale price; taxes, payment fees, labor and depreciation are not calculated automatically.
