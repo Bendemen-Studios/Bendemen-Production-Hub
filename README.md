@@ -128,3 +128,10 @@ Spools with matching name, brand, material and color are grouped in a product ov
 ## Monthly financial reports
 
 The dashboard includes monthly sales reports for up to the last 36 months (12 months shown by default). Each month shows the number of registered sales, revenue, filament material costs, additional costs, total costs and calculated profit. Reports are based on sale registration dates. Only registered sales are included; unsold prints and unrecorded expenses are not automatically estimated.
+
+
+## Slicer integration — v1.0
+
+The first slicer integration targets OrcaSlicer and supports the common text G-code metadata format also used by PrusaSlicer. Import metadata through the authenticated `POST /api/slicer/import` endpoint with JSON fields `filename` and `header`. Send only the G-code header (up to 512 KB), not the complete G-code file. The Hub records the file name, slicer/version, estimated print duration, total filament grams, material, layer count and layer height. Retrieve recent imports through `GET /api/slicer/imports`.
+
+This first milestone is metadata import only: it does not upload, store, execute, or send G-code to a printer. It does not start prints or automatically deduct filament stock. OrcaSlicer is the primary target; PrusaSlicer-compatible headers are supported where they use the same metadata comments. Binary .bgcode and 3MF project files are not parsed in this milestone.
