@@ -5,13 +5,18 @@ Self-hosted production and 3D-printer management. MVP v0.1 provides a VPS dashbo
 ## VPS deployment
 
 1. Clone this repository and enter the directory.
-2. Copy `.env.example` to `.env`.
-3. Generate two separate secrets with `openssl rand -hex 32`; set `HUB_ADMIN_PASSWORD` and `HUB_AGENT_TOKEN`.
-4. Set a strong `HUB_ADMIN_USER`.
-5. Run `docker compose up -d --build`.
-6. In Nginx Proxy Manager, create a Proxy Host for your domain. Forward to this host on port 8000, enable WebSocket Support, request an SSL certificate and force HTTPS.
+2. Find the Docker network used by Nginx Proxy Manager with `docker network ls`. Put its exact name in `NPM_DOCKER_NETWORK` in `.env`.
+3. Copy `.env.example` to `.env`.
+4. Generate two separate secrets with `openssl rand -hex 32`; set `HUB_ADMIN_PASSWORD` and `HUB_AGENT_TOKEN`. Set a strong `HUB_ADMIN_USER`.
+5. Ensure the NPM container is attached to the network named by `NPM_DOCKER_NETWORK`.
+6. Run `docker compose up -d --build`.
+7. In Nginx Proxy Manager, create a Proxy Host for your domain:
+   - Scheme: `http`
+   - Forward Hostname/IP: `bendemen-production-hub`
+   - Forward Port: `8000`
+   - Enable WebSocket Support, request an SSL certificate and force HTTPS.
 
-The API binds to 127.0.0.1:8000 by default. If NPM runs in another Docker network, connect both containers to a shared private Docker network and proxy to `production-hub:8000`. Do not publish printer ports or the API directly to the internet.
+The API is only exposed to the private Docker network shared with NPM. No host port is published. Do not publish printer ports or the API directly to the internet.
 
 ## Local agent
 
