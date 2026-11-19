@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -55,6 +55,48 @@ def clean_text(value, limit=128):
     return str(value or "").strip()[:limit]
 
 
+
+def is_printing(status: str) -> bool:
+    value = clean_text(status, 32).lower()
+    return value in {"printing", "print", "running"} or "printing" in value
+
+
+def finish_result(status: str, progress) -> str:
+    value = clean_text(status, 32).lower()
+    if any(word in value for word in ("complete", "finished", "finish", "success")):
+        return "completed"
+    if progress is not None and progress >= 0.999:
+        return "completed"
+    if any(word in value for word in ("cancel", "abort", "stop", "error", "fail")):
+        return "stopped"
+    return "interrupted"
+
+
+def record_print_update(conn, agent_id: str, payload: dict, seen: str):
+    active = conn.execute(
+        "SELECT id,file_name FROM print_jobs WHERE agent_id=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    printing = is_printing(payload.get("printer_status", ""))
+    file_name = clean_text(payload.get("file_name"), 128)
+    if printing:
+        if active and active["file_name"] != (file_name or "Unknown file"):
+            conn.execute("UPDATE print_jobs SET ended_at=?, result='interrupted' WHERE id=?", (seen, active["id"]))
+            active = None
+        if active is None:
+            conn.execute(
+                "INSERT INTO print_jobs(agent_id,file_name,started_at,last_progress) VALUES(?,?,?,?)",
+                (agent_id, file_name or "Unknown file", seen, payload.get("progress")),
+            )
+        else:
+            conn.execute("UPDATE print_jobs SET last_progress=? WHERE id=?", (payload.get("progress"), active["id"]))
+    elif active:
+        conn.execute(
+            "UPDATE print_jobs SET ended_at=?, result=? WHERE id=?",
+            (seen, finish_result(payload.get("printer_status", ""), payload.get("progress")), active["id"]),
+        )
+
+
 def public_agent(agent_id: str, payload: dict, last_seen: str, online: bool) -> dict:
     return {
         "agent_id": agent_id,
@@ -88,6 +130,16 @@ async def startup():
         conn.execute("""CREATE TABLE IF NOT EXISTS agents (
             agent_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL, payload TEXT NOT NULL
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS print_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            result TEXT,
+            last_progress REAL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_print_jobs_started ON print_jobs(started_at DESC)")
 
 
 def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -123,12 +175,17 @@ h1{font-size:26px;margin:0}p,.muted{color:var(--muted)}.pill{border:1px solid #3
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.stat{background:#14161a;border-radius:10px;padding:12px}
 .stat-value{font-size:20px;font-weight:650;margin-top:5px}.bar{height:7px;background:#30333b;border-radius:20px;margin-top:10px;overflow:hidden}.fill{height:100%;background:var(--accent);width:0}
 .job{margin-top:14px;color:#e0e2e7;overflow-wrap:anywhere}.muted-line{font-size:12px;color:var(--muted);margin-top:6px}
+.history-wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;padding:13px 15px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}tr:last-child td{border-bottom:0}
+.result{display:inline-block;border-radius:99px;padding:5px 8px;background:#30333b;font-size:11px}
+.result.completed{background:#163528;color:#9ce2bb}.result.stopped{background:#3b2525;color:#efaaaa}
 .empty{padding:26px;border:1px dashed #41444d;border-radius:14px;color:var(--muted);text-align:center}
 .notice{margin-top:22px;padding:13px 15px;border-radius:12px;background:#241c1b;border:1px solid #49302d;color:#e5c2bd}
 footer{margin-top:28px;color:#747985;font-size:12px}
 @media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
 </style></head><body><main>
-<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.3.0</span></div>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.4.0</span></div>
 <div class="summary">
 <section class="metric"><div class="label">Printers registered</div><div class="metric-value" id="count">0</div></section>
 <section class="metric"><div class="label">Agents online</div><div class="metric-value" id="online">0</div></section>
@@ -137,7 +194,7 @@ footer{margin-top:28px;color:#747985;font-size:12px}
 </div>
 <h2 class="section">Printers</h2>
 <div class="printers" id="printers"><div class="empty">Waiting for a local agent to connect…</div></div>
-<div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
+<h2 class="section">Print history</h2><div class="history-wrap" id="history"><div class="empty">No print jobs recorded yet.</div></div><div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
 const $=id=>document.getElementById(id);
