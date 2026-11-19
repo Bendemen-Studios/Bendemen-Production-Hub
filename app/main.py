@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 NAME = "Bendemen Production Hub"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 DB_PATH = os.getenv("HUB_DATABASE_PATH", "/data/hub.sqlite3")
 ADMIN_USER = os.getenv("HUB_ADMIN_USER", "")
 ADMIN_PASSWORD = os.getenv("HUB_ADMIN_PASSWORD", "")
@@ -97,6 +97,40 @@ def record_print_update(conn, agent_id: str, payload: dict, seen: str):
         )
 
 
+
+def normalize_filament(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("Expected a JSON object.")
+    name = clean_text(data.get("name"), 80)
+    brand = clean_text(data.get("brand"), 80)
+    material = clean_text(data.get("material"), 24).upper()
+    color = clean_text(data.get("color"), 40)
+    notes = clean_text(data.get("notes"), 500)
+    allowed_materials = {"PLA", "PLA+", "PETG", "ABS", "ASA", "TPU", "NYLON", "PC", "OTHER"}
+    if not name:
+        raise ValueError("Filament name is required.")
+    if material not in allowed_materials:
+        raise ValueError("Unsupported material type.")
+    spool_weight = safe_number(data.get("spool_weight_g"))
+    remaining = safe_number(data.get("remaining_weight_g"))
+    if spool_weight is None or remaining is None or spool_weight <= 0 or remaining < 0:
+        raise ValueError("Weights must be valid positive gram values.")
+    if remaining > spool_weight:
+        raise ValueError("Remaining weight cannot exceed spool weight.")
+    return {
+        "name": name, "brand": brand, "material": material, "color": color,
+        "spool_weight_g": float(spool_weight), "remaining_weight_g": float(remaining),
+        "notes": notes,
+    }
+
+
+def public_filament(row) -> dict:
+    return {key: row[key] for key in (
+        "id", "name", "brand", "material", "color",
+        "spool_weight_g", "remaining_weight_g", "notes", "created_at", "updated_at"
+    )}
+
+
 def public_agent(agent_id: str, payload: dict, last_seen: str, online: bool) -> dict:
     return {
         "agent_id": agent_id,
@@ -140,6 +174,19 @@ async def startup():
             last_progress REAL
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_print_jobs_started ON print_jobs(started_at DESC)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS filaments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            brand TEXT NOT NULL DEFAULT '',
+            material TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '',
+            spool_weight_g REAL NOT NULL,
+            remaining_weight_g REAL NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_filaments_updated ON filaments(updated_at DESC)")
 
 
 def admin_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -180,12 +227,25 @@ table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;
 th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}tr:last-child td{border-bottom:0}
 .result{display:inline-block;border-radius:99px;padding:5px 8px;background:#30333b;font-size:11px}
 .result.completed{background:#163528;color:#9ce2bb}.result.stopped{background:#3b2525;color:#efaaaa}
+.inventory-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.filament{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.filament-top{display:flex;gap:12px;align-items:center}.swatch{width:34px;height:34px;border-radius:10px;background:#777;border:1px solid #ffffff33;flex:none}
+.filament-title{font-weight:650}.filament-meta{font-size:12px;color:var(--muted);margin-top:4px}
+.stockbar{height:8px;border-radius:10px;background:#30333b;overflow:hidden;margin-top:13px}.stockfill{height:100%;background:var(--accent)}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}
+.field input,.field select,.field textarea{width:100%;background:#111318;color:#f5f5f5;border:1px solid #3a3d46;border-radius:8px;padding:10px;font:inherit}
+.field textarea{min-height:65px;resize:vertical}.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.action{border:1px solid #41444d;background:#24272e;color:#fff;border-radius:8px;padding:8px 11px;cursor:pointer}
+.action.primary{background:var(--accent);border-color:var(--accent)}.action.danger{color:#ffaaa5}
+.inventory-form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.form-message{font-size:13px;color:var(--muted);margin-top:10px}
 .empty{padding:26px;border:1px dashed #41444d;border-radius:14px;color:var(--muted);text-align:center}
 .notice{margin-top:22px;padding:13px 15px;border-radius:12px;background:#241c1b;border:1px solid #49302d;color:#e5c2bd}
 footer{margin-top:28px;color:#747985;font-size:12px}
 @media(max-width:520px){main{padding:24px 14px}.head{align-items:flex-start;flex-direction:column}h1{font-size:22px}}
 </style></head><body><main>
-<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.4.0</span></div>
+<div class="head"><div><h1>Bendemen Production Hub</h1><p>Self-hosted production management</p></div><span class="pill">MVP · v0.5.0</span></div>
 <div class="summary">
 <section class="metric"><div class="label">Printers registered</div><div class="metric-value" id="count">0</div></section>
 <section class="metric"><div class="label">Agents online</div><div class="metric-value" id="online">0</div></section>
@@ -194,6 +254,21 @@ footer{margin-top:28px;color:#747985;font-size:12px}
 </div>
 <h2 class="section">Printers</h2>
 <div class="printers" id="printers"><div class="empty">Waiting for a local agent to connect…</div></div>
+<h2 class="section">Filament inventory</h2>
+<div class="inventory-form">
+ <div class="form-grid">
+  <div class="field"><label for="fil-name">Name *</label><input id="fil-name" maxlength="80" placeholder="eSUN PLA+ Black"></div>
+  <div class="field"><label for="fil-brand">Brand</label><input id="fil-brand" maxlength="80" placeholder="eSUN"></div>
+  <div class="field"><label for="fil-material">Material *</label><select id="fil-material"><option>PLA</option><option>PLA+</option><option>PETG</option><option>ABS</option><option>ASA</option><option>TPU</option><option>NYLON</option><option>PC</option><option>OTHER</option></select></div>
+  <div class="field"><label for="fil-color">Color</label><input id="fil-color" maxlength="40" placeholder="Matte black"></div>
+  <div class="field"><label for="fil-spool">Original spool weight (g) *</label><input id="fil-spool" type="number" min="1" step="1" value="1000"></div>
+  <div class="field"><label for="fil-remaining">Remaining filament (g) *</label><input id="fil-remaining" type="number" min="0" step="1" value="1000"></div>
+ </div>
+ <div class="field" style="margin-top:10px"><label for="fil-notes">Notes</label><textarea id="fil-notes" maxlength="500" placeholder="Nozzle temperature, storage location…"></textarea></div>
+ <div class="actions"><button class="action primary" id="fil-save">Add filament</button><button class="action" id="fil-cancel" hidden>Cancel edit</button></div>
+ <div class="form-message" id="fil-message">Keep track of spool stock manually. Automatic consumption is not enabled yet.</div>
+</div>
+<div class="inventory-grid" id="filaments"><div class="empty">Loading filament stock…</div></div>
 <h2 class="section">Print history</h2><div class="history-wrap" id="history"><div class="empty">No print jobs recorded yet.</div></div><div class="notice"><b>Read-only mode:</b> the Hub reads printer telemetry only. No print, movement, pause, cancel or heater commands are sent.</div>
 <footer>Bendemen Studios · Bendemen Production Hub</footer></main>
 <script>
@@ -229,6 +304,58 @@ function printerCard(a){
  if(a.printer_host)card.append(node('div','muted-line','LAN: '+a.printer_host+':8898'));
  return card;
 }
+
+let editingFilament=null;
+function filamentCard(f){
+ const card=node('article','filament'),top=node('div','filament-top'),swatch=node('div','swatch');
+ const colors={"black":"#222","white":"#eee","red":"#c3110c","blue":"#2563eb","green":"#16a34a","yellow":"#eab308","orange":"#f97316","gold":"#d4a017","silver":"#9ca3af"};
+ const key=(f.color||'').toLowerCase();swatch.style.background=colors[key]||(/^#[0-9a-f]{6}$/i.test(f.color||'')?f.color:'#777');
+ const info=node('div','');info.append(node('div','filament-title',f.name),node('div','filament-meta',[f.brand,f.material,f.color].filter(Boolean).join(' · ')));
+ top.append(swatch,info);card.append(top);
+ const percent=f.spool_weight_g>0?Math.max(0,Math.min(100,f.remaining_weight_g/f.spool_weight_g*100)):0;
+ card.append(node('div','filament-meta',Math.round(f.remaining_weight_g)+' g remaining · '+Math.round(percent)+'% of '+Math.round(f.spool_weight_g)+' g'));
+ const bar=node('div','stockbar'),fill=node('div','stockfill');fill.style.width=percent+'%';bar.append(fill);card.append(bar);
+ if(f.notes)card.append(node('div','filament-meta',f.notes));
+ const actions=node('div','actions'),edit=node('button','action','Edit'),del=node('button','action danger','Delete');
+ edit.type=del.type='button';edit.addEventListener('click',()=>editFilament(f));del.addEventListener('click',()=>deleteFilament(f.id));actions.append(edit,del);card.append(actions);
+ return card;
+}
+async function refreshFilaments(){
+ const target=$('filaments');
+ try{const r=await fetch('/api/filaments',{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();target.replaceChildren();
+  if(!data.filaments.length){target.append(node('div','empty','No filament spools added yet.'));return}
+  data.filaments.forEach(f=>target.append(filamentCard(f)));
+ }catch(e){target.textContent='Could not load filament inventory'}
+}
+function resetFilamentForm(){
+ editingFilament=null;
+ ['fil-name','fil-brand','fil-color','fil-notes'].forEach(id=>$(id).value='');
+ $('fil-material').value='PLA';$('fil-spool').value='1000';$('fil-remaining').value='1000';
+ $('fil-save').textContent='Add filament';$('fil-cancel').hidden=true;
+}
+function editFilament(f){
+ editingFilament=f.id;
+ $('fil-name').value=f.name;$('fil-brand').value=f.brand;$('fil-material').value=f.material;
+ $('fil-color').value=f.color;$('fil-spool').value=f.spool_weight_g;$('fil-remaining').value=f.remaining_weight_g;$('fil-notes').value=f.notes;
+ $('fil-save').textContent='Save changes';$('fil-cancel').hidden=false;$('fil-message').textContent='Editing '+f.name;
+ $('fil-name').focus();window.scrollTo({top:0,behavior:'smooth'});
+}
+async function saveFilament(){
+ const payload={name:$('fil-name').value,brand:$('fil-brand').value,material:$('fil-material').value,color:$('fil-color').value,
+  spool_weight_g:Number($('fil-spool').value),remaining_weight_g:Number($('fil-remaining').value),notes:$('fil-notes').value};
+ $('fil-save').disabled=true;
+ try{const r=await fetch(editingFilament?'/api/filaments/'+editingFilament:'/api/filaments',{method:editingFilament?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await r.json();if(!r.ok)throw Error(data.detail||'Could not save filament');
+  $('fil-message').textContent=editingFilament?'Filament updated.':'Filament added.';resetFilamentForm();await refreshFilaments();
+ }catch(e){$('fil-message').textContent=e.message}finally{$('fil-save').disabled=false}
+}
+async function deleteFilament(id){
+ if(!confirm('Delete this filament spool?'))return;
+ try{const r=await fetch('/api/filaments/'+id,{method:'DELETE'});if(!r.ok)throw Error();await refreshFilaments()}
+ catch(e){$('fil-message').textContent='Could not delete filament'}
+}
+$('fil-save').addEventListener('click',saveFilament);
+$('fil-cancel').addEventListener('click',()=>{resetFilamentForm();$('fil-message').textContent='Edit cancelled.'});
 async function refreshHistory(){
  try{
   const r=await fetch('/api/history?limit=20',{cache:'no-store'});if(!r.ok)throw Error();
@@ -258,7 +385,7 @@ async function refresh(){
   else agents.forEach(a=>target.append(printerCard(a)));
  }catch(e){$('hub').textContent='Unavailable';$('updated').textContent='Could not load printer status'}
 }
-refresh();refreshHistory();setInterval(refresh,4000);setInterval(refreshHistory,15000);
+refresh();refreshHistory();refreshFilaments();setInterval(refresh,4000);setInterval(refreshHistory,15000);setInterval(refreshFilaments,30000);
 </script></body></html>"""
 
 
@@ -277,6 +404,61 @@ async def status(_: str = Depends(admin_auth)):
         records[agent_id] = public_agent(agent_id, state, state.get("last_seen", utcnow()), agent_id in connections)
     agents = sorted(records.values(), key=lambda item: item["printer_name"].lower())
     return JSONResponse({"application": NAME, "version": VERSION, "agents": agents, "agent": agents[0] if agents else None})
+
+
+
+@app.get("/api/filaments")
+async def list_filaments(_: str = Depends(admin_auth)):
+    with database() as conn:
+        rows = conn.execute("SELECT * FROM filaments ORDER BY updated_at DESC, id DESC").fetchall()
+    return {"filaments": [public_filament(row) for row in rows]}
+
+
+@app.post("/api/filaments")
+async def create_filament(payload: dict, _: str = Depends(admin_auth)):
+    try:
+        item = normalize_filament(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    now = utcnow()
+    with database() as conn:
+        cursor = conn.execute(
+            """INSERT INTO filaments(name,brand,material,color,spool_weight_g,remaining_weight_g,notes,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
+             item["remaining_weight_g"], item["notes"], now, now),
+        )
+        row = conn.execute("SELECT * FROM filaments WHERE id=?", (cursor.lastrowid,)).fetchone()
+    return {"filament": public_filament(row)}
+
+
+@app.put("/api/filaments/{filament_id}")
+async def update_filament(filament_id: int, payload: dict, _: str = Depends(admin_auth)):
+    try:
+        item = normalize_filament(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    now = utcnow()
+    with database() as conn:
+        cursor = conn.execute(
+            """UPDATE filaments SET name=?,brand=?,material=?,color=?,spool_weight_g=?,
+               remaining_weight_g=?,notes=?,updated_at=? WHERE id=?""",
+            (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
+             item["remaining_weight_g"], item["notes"], now, filament_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "Filament not found")
+        row = conn.execute("SELECT * FROM filaments WHERE id=?", (filament_id,)).fetchone()
+    return {"filament": public_filament(row)}
+
+
+@app.delete("/api/filaments/{filament_id}")
+async def delete_filament(filament_id: int, _: str = Depends(admin_auth)):
+    with database() as conn:
+        cursor = conn.execute("DELETE FROM filaments WHERE id=?", (filament_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "Filament not found")
+    return {"deleted": True}
 
 
 @app.get("/api/history")
