@@ -682,10 +682,10 @@ async def create_filament(payload: dict, _: str = Depends(admin_auth)):
     now = utcnow()
     with database() as conn:
         cursor = conn.execute(
-            """INSERT INTO filaments(name,brand,material,color,spool_weight_g,remaining_weight_g,notes,shopping_url,purchase_price_eur,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO filaments(name,brand,material,color,spool_weight_g,remaining_weight_g,notes,shopping_url,purchase_price_eur,low_stock_threshold_g,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
-             item["remaining_weight_g"], item["notes"], item["shopping_url"], item["purchase_price_eur"], now, now),
+             item["remaining_weight_g"], item["notes"], item["shopping_url"], item["purchase_price_eur"], item["low_stock_threshold_g"], now, now),
         )
         row = conn.execute("SELECT * FROM filaments WHERE id=?", (cursor.lastrowid,)).fetchone()
     return {"filament": public_filament(row)}
@@ -701,9 +701,9 @@ async def update_filament(filament_id: int, payload: dict, _: str = Depends(admi
     with database() as conn:
         cursor = conn.execute(
             """UPDATE filaments SET name=?,brand=?,material=?,color=?,spool_weight_g=?,
-               remaining_weight_g=?,notes=?,shopping_url=?,purchase_price_eur=?,updated_at=? WHERE id=?""",
+               remaining_weight_g=?,notes=?,shopping_url=?,purchase_price_eur=?,low_stock_threshold_g=?,updated_at=? WHERE id=?""",
             (item["name"], item["brand"], item["material"], item["color"], item["spool_weight_g"],
-             item["remaining_weight_g"], item["notes"], item["shopping_url"], item["purchase_price_eur"], now, filament_id),
+             item["remaining_weight_g"], item["notes"], item["shopping_url"], item["purchase_price_eur"], item["low_stock_threshold_g"], now, filament_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(404, "Filament not found")
